@@ -1,0 +1,27 @@
+# TGLC XRPL Platform
+
+## Structure
+- `api/` - FastAPI backend (Python)
+- `web/` - Next.js frontend (TypeScript)
+- `scripts/` - Admin scripts
+
+## Dependencies
+- Backend: fastapi, uvicorn, xrpl-py, python-dotenv, pydantic
+- Frontend: next, react, xrpl, xrpl-connect, zustand, lucide-react, clsx, tailwind-merge
+
+## XRPL SDK Patterns
+- Use `Client` with WebSocket URLs (wss://)
+- Use `client.fundWallet()` for testnet wallet creation
+- Use `client.submitAndWait(tx, { autofill: true, wallet })` for transactions
+- Use `xrpToDrops()` for XRP amount conversion
+
+## Code Style
+- Minimal, no verbose comments
+- Python: type hints, PEP 8
+- TypeScript: strict mode, functional components
+- No markdown in code files
+
+## Environment
+- Testnet: wss://s.altnet.rippletest.net:51233
+- Mainnet: wss://xrplcluster.com/
+- Configure via XRPL_NETWORK env var
