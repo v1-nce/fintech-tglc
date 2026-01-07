@@ -29,7 +29,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
+
+# Windows
 copy .env.example .env
+
+# macOS / Linux
+cp .env.example .env
 ```
 
 ### 3. Generate Issuer Wallet
@@ -64,7 +69,11 @@ ISSUER_SEED=sXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 ```powershell
 cd api
+# if not using .venv
 uvicorn app.main:app --reload
+
+# if using .venv
+uvicorn app.main:app --reload --reload-exclude "*.pyc" --reload-exclude ".venv/**/*" --reload-exclude "**/.venv/**"
 ```
 
 Backend: http://localhost:8000
@@ -76,7 +85,12 @@ Backend: http://localhost:8000
 ```powershell
 cd web
 npm install
+
+# Windows
 copy .env.local.example .env.local
+
+# macOS / Linux
+cp .env.local.example .env.local
 ```
 
 Edit `web/.env.local` and add the Issuer Address:
