@@ -75,6 +75,10 @@ class XRPLClient:
     # =========================================================
 
     @property
+    def client(self) -> JsonRpcClient:
+        return self._client
+
+    @property
     def network(self) -> str:
         return self._network
 
