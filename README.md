@@ -4,7 +4,7 @@
 
 A capital-efficient, compliance-first platform built on the XRPL, enabling regulated institutions (banks) and their corporate clients (principals) to securely access short-term cross-border liquidity.
 
-The system allows AI agents to act as delegated representatives for businesses, requesting liquidity under strict pre-approved limits—reducing capital requirements while preserving privacy and ensuring regulatory compliance.
+The system allows AI agents to act as delegated representatives, raising funds under strict pre-approved limits — reducing pre-funding requirements. In addition, they preserve privacy and ensure regulatory compliance.
 
 ## Platform Scope
 
