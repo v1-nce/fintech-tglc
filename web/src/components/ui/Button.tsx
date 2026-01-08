@@ -90,13 +90,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     const renderIcon = () => {
       if (!iconName) return null;
+      const hasChildren = Boolean(children);
       return (
         <AppIcon
           name={iconName}
           size={calculatedIconSize}
           className={cn(
-            children && iconPosition === 'left' && 'mr-2',
-            children && iconPosition === 'right' && 'ml-2'
+            hasChildren && iconPosition === 'left' ? 'mr-2' : undefined,
+            hasChildren && iconPosition === 'right' ? 'ml-2' : undefined
           )}
         />
       );

@@ -1,11 +1,18 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
 
+interface ImpactFactor {
+  impact: 'positive' | 'negative' | string;
+  icon: string;
+  label: string;
+  description: string;
+}
+
 interface CreditImpactCardProps {
   currentScore: number;
   projectedScore: number;
   scoreChange: number;
-  impactFactors: object[]; 
+  impactFactors: ImpactFactor[]; 
 }
 
 const CreditImpactCard = ({ currentScore  , projectedScore, scoreChange, impactFactors } : CreditImpactCardProps) => {
