@@ -103,6 +103,10 @@ async def request_liquidity(req: LiquidityRequest):
         
         logger.info(f"Liquidity request: address={req.principal_address}, amount={req.amount_xrp}, score={eligibility['credit']['score']}")
         
+        # Debug: log all available banks
+        all_banks = await run_in_threadpool(bank_svc.get_all_banks)
+        logger.info(f"Available banks: {[(b['bank_name'], b['wallet_address'], b.get('balance_xrp', 0)) for b in all_banks]}")
+        
         # -----------------------------
         # Step 4: Find a matching bank
         # -----------------------------
@@ -114,6 +118,22 @@ async def request_liquidity(req: LiquidityRequest):
             req.amount_xrp,
             eligibility["credit"]["score"]
         )
+        
+        logger.info(f"Matching banks found: {len(matching_banks)} out of {len(all_banks)}")
+        for bank in matching_banks:
+            logger.info(f"  Matched: {bank['bank_name']} ({bank['wallet_address']})")
+        
+        # If no banks match, log why
+        if not matching_banks and all_banks:
+            logger.warning(f"No banks matched. Debug:")
+            for bank in all_banks:
+                policy = bank["credit_policy"]
+                balance = bank.get("balance_xrp", 0)
+                logger.warning(f"  Bank: {bank['bank_name']}")
+                logger.warning(f"    - Policy min: {policy['min']}, requested score: {eligibility['credit']['score']} (pass: {policy['min'] <= eligibility['credit']['score']})")
+                logger.warning(f"    - Policy max: {policy['max']}, requested amount: {req.amount_xrp} (pass: {policy['max'] >= req.amount_xrp})")
+                logger.warning(f"    - Balance: {balance} XRP, requested: {req.amount_xrp} (pass: {balance >= req.amount_xrp})")
+                logger.warning(f"    - Active: {bank.get('active', True)}")
         
         # -----------------------------
         # Step 5: Prepare escrow

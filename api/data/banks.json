@@ -12,6 +12,7 @@
       "risk_score_threshold": 300
     },
     "trustlines": [],
+    "balance_xrp": 50000.0,
     "active": true
   }
 ]
