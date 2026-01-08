@@ -2,10 +2,13 @@ import os
 import threading
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import datetime
 
+from xrpl.models.requests import AccountInfo
+from xrpl.models.transactions import TrustSet
+from xrpl.transaction import submit_and_wait
 from xrpl.clients import JsonRpcClient
 from xrpl.wallet import Wallet
-from xrpl.transaction import submit_and_wait
 
 
 # =====================
@@ -128,8 +131,6 @@ class XRPLClient:
         """
         Return basic account info for the platform wallet.
         """
-        from xrpl.models.requests import AccountInfo
-
         try:
             req = AccountInfo(
                 account=self.address,
@@ -139,3 +140,55 @@ class XRPLClient:
             return response.result
         except Exception as e:
             raise XRPLClientError(f"Failed to fetch account info: {e}") from e
+
+    def set_trustline(
+        self,
+        account: str,
+        limit_amount: float,
+        currency: str,
+        issuer: str,
+        expiration: datetime | None = None,
+    ) -> dict:
+        """
+        Set or update a TrustLine on XRPL for a business account.
+
+        :param account: The account that will hold the TrustLine (business)
+        :param limit_amount: Maximum amount the account can hold (numeric)
+        :param currency: Currency code (3-letter or token code, e.g., USDC)
+        :param issuer: Issuer address of the currency (usually the bank)
+        :param expiration: Optional expiration timestamp for off-chain tracking
+        :return: XRPL transaction result as dict
+        :raises XRPLSubmissionError: if submission fails
+        """
+        # Build the TrustSet transaction
+        try:
+            tx = TrustSet(
+                account=account,
+                limit_amount={
+                    "currency": currency,
+                    "issuer": issuer,
+                    "value": str(limit_amount),
+                },
+            )
+
+            # Sign + autofill + submit all in one
+            response = submit_and_wait(
+                tx,              # unsigned transaction
+                self._client,    # client
+                self._wallet     # wallet to sign with
+            )
+
+            if not response.is_successful():
+                raise XRPLSubmissionError(
+                    f"Transaction failed: {response.result}"
+                )
+
+            result = response.result
+
+            if expiration:
+                result["expires_at"] = expiration.isoformat()
+
+            return result
+
+        except Exception as e:
+            raise XRPLSubmissionError(f"Failed to set TrustLine: {e}") from e

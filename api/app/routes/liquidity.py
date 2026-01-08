@@ -3,20 +3,32 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 import logging
+
 from ..services.proof_verifier import ProofVerifier
-from ..agent.bot import AgentBot
-from ..utils.validators import validate_xrpl_address
+from ..agent.business_agent import BusinessAgent
+from ..agent.bank_agent import BankAgent
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/liquidity", tags=["liquidity"])
+router = APIRouter(prefix="/liquidity", tags=["Liquidity"])
 
+# -------------------
+# Utilities
+# -------------------
+def validate_xrpl_address(address: str) -> str:
+    if not re.match(r'^r[1-9A-HJ-NP-Za-km-z]{25,34}$', address):
+        raise ValueError("Invalid XRPL address format")
+    return address
+
+# -------------------
+# Pydantic Models
+# -------------------
 class ProofPayload(BaseModel):
     metrics: dict
 
 class LiquidityRequest(BaseModel):
     principal_did: str = Field(..., min_length=10)
     principal_address: str = Field(..., min_length=25, max_length=35)
-    amount_xrp: float = Field(..., gt=0, le=1000000000)
+    amount_xrp: float = Field(..., gt=0, le=1_000_000_000)
     proof_data: Optional[ProofPayload] = None
 
     @field_validator('principal_address')
@@ -24,32 +36,47 @@ class LiquidityRequest(BaseModel):
     def validate_address(cls, v: str) -> str:
         return validate_xrpl_address(v)
 
+# -------------------
+# Endpoints
+# -------------------
 @router.post("/request")
 async def request_liquidity(req: LiquidityRequest):
+    """
+    Process a liquidity request from a business:
+    1. Verify proof data
+    2. BusinessAgent prepares request
+    3. BankAgent evaluates request
+    """
     try:
-        verifier = ProofVerifier()
-        proof_result = None
+        # Step 1: Verify proof data (optional)
+        proof_result = {}
         if req.proof_data:
+            # Convert the dict into a ProofPayload object with all fields
+            proof_obj = ProofPayload(**req.proof_data.model_dump())
+            verifier = ProofVerifier()
             proof_result = await run_in_threadpool(
                 verifier.verify,
-                req.proof_data.model_dump() if hasattr(req.proof_data, 'model_dump') else req.proof_data
+                proof_obj  # pass the object, not a dict
             )
-        
-        # NOTE:
-        # BackgroundTasks is used as a temporary async mechanism.
-        # In production, this will be replaced with a durable task queue.
-        agent = AgentBot()
-        result = agent.evaluate(
-            req.principal_did,
-            req.principal_address,
-            req.amount_xrp,
-            proof_result
+
+        # Step 2: Business prepares liquidity request
+        business_agent = BusinessAgent()
+        liquidity_request = business_agent.prepare_request(
+            principal_did=req.principal_did,
+            principal_address=req.principal_address,
+            amount=req.amount_xrp,
+            proof_metrics=proof_result
         )
-        
-        if result.get("status") == "rejected":
-            raise HTTPException(status_code=400, detail=result.get("reason", "Request rejected"))
-        
-        return result
+
+        # Step 3: Bank evaluates the request
+        bank_agent = BankAgent()
+        decision = bank_agent.evaluate(liquidity_request)
+
+        if decision.status == "rejected":
+            raise HTTPException(status_code=400, detail=decision.reason)
+
+        return {"status": "approved", "decision": decision.dict()}
+
     except HTTPException:
         raise
     except ValueError as e:
@@ -58,7 +85,20 @@ async def request_liquidity(req: LiquidityRequest):
         logger.error(f"Liquidity request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to process liquidity request")
 
+
 @router.post("/verify-proof")
 async def verify_proof(proof_data: ProofPayload):
-    verifier = ProofVerifier()
-    return verifier.verify(proof_data.model_dump())
+    """
+    Standalone endpoint to verify proof data.
+    """
+    try:
+        # proof_data is already a ProofPayload with all attributes
+        verifier = ProofVerifier()
+        result = await run_in_threadpool(
+            verifier.verify,
+            proof_data  # pass the object directly
+        )
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.error(f"Proof verification failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to verify proof")
