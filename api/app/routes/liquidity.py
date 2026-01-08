@@ -159,7 +159,7 @@ async def request_liquidity(req: LiquidityRequest):
             prepared_tx = await run_in_threadpool(autofill, escrow_tx, xrpl_client.client)
             response = await run_in_threadpool(xrpl_client.submit, prepared_tx, platform_wallet)
             
-            tx_hash = response.result.get("hash")
+            tx_hash = response.get("hash")
             logger.info(f"Escrow created directly: {tx_hash}")
             
             return {
