@@ -2,9 +2,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-import logging
+import logging, re
+from datetime import datetime
 
 from ..services.proof_verifier import ProofVerifier
+from ..services.risk_model import RiskModel
+from ..services.liquidity_engine import LiquidityEngine
+from ..services.credential_service import CredentialService
+from ..services.policy_engine import PolicyEngine
+from ..models.exposure_state import ExposureState
+from ..services.xrpl_client import XRPLClient
 from ..agent.business_agent import BusinessAgent
 from ..agent.bank_agent import BankAgent
 
@@ -29,6 +36,7 @@ class LiquidityRequest(BaseModel):
     principal_did: str = Field(..., min_length=10)
     principal_address: str = Field(..., min_length=25, max_length=35)
     amount_xrp: float = Field(..., gt=0, le=1_000_000_000)
+    unlock_time: datetime = Field(..., description="UTC datetime when escrow can be released")
     proof_data: Optional[ProofPayload] = None
 
     @field_validator('principal_address')
@@ -41,38 +49,35 @@ class LiquidityRequest(BaseModel):
 # -------------------
 @router.post("/request")
 async def request_liquidity(req: LiquidityRequest):
-    """
-    Process a liquidity request from a business:
-    1. Verify proof data
-    2. BusinessAgent prepares request
-    3. BankAgent evaluates request
-    """
     try:
         # Step 1: Verify proof data (optional)
         proof_result = {}
         if req.proof_data:
-            # Convert the dict into a ProofPayload object with all fields
             proof_obj = ProofPayload(**req.proof_data.model_dump())
             verifier = ProofVerifier()
-            proof_result = await run_in_threadpool(
-                verifier.verify,
-                proof_obj  # pass the object, not a dict
-            )
+            proof_result = await run_in_threadpool(verifier.verify, proof_obj)
 
         # Step 2: Business prepares liquidity request
-        business_agent = BusinessAgent()
-        liquidity_request = business_agent.prepare_request(
-            principal_did=req.principal_did,
-            principal_address=req.principal_address,
-            amount=req.amount_xrp,
-            proof_metrics=proof_result
+        business_agent = BusinessAgent(
+            risk_model=RiskModel(),
+            liquidity_engine=LiquidityEngine(),
+            credential_service=CredentialService()
+        )
+        liquidity_request_internal = business_agent.act(
+            business_id=req.principal_did,
+            unlock_time=req.unlock_time
         )
 
         # Step 3: Bank evaluates the request
-        bank_agent = BankAgent()
-        decision = bank_agent.evaluate(liquidity_request)
+        bank_agent = BankAgent(
+            proof_verifier=ProofVerifier(),
+            policy_engine=PolicyEngine(),
+            exposure_state=ExposureState(),
+            xrpl_client=XRPLClient()
+        )
+        decision = bank_agent.act(liquidity_request_internal)
 
-        if decision.status == "rejected":
+        if not decision.approved:
             raise HTTPException(status_code=400, detail=decision.reason)
 
         return {"status": "approved", "decision": decision.dict()}

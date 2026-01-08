@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Dict
+from datetime import datetime, timezone
 
 class LiquidityRequest(BaseModel):
     """
@@ -15,5 +16,5 @@ class LiquidityRequest(BaseModel):
     """
     business_id: str
     requested_amount: float
-    duration_days: int
+    unlock_timestamp: datetime # For escrow
     metrics: Dict[str, float]
