@@ -1,107 +1,68 @@
-# /api/app/services/escrow_service.py
+# api/app/services/escrow_service.py
 
-from typing import Optional
 import logging
-
-from xrpl.models.transactions import EscrowCreate, EscrowFinish, EscrowCancel
-from xrpl.utils import xrp_to_drops
-from xrpl.transaction import submit_and_wait
-from .xrpl_client import XRPLClient
+from datetime import datetime, timedelta
 from xrpl.wallet import Wallet
-from ..utils.validators import validate_xrpl_address, validate_xrp_amount, validate_condition, validate_fulfillment
+from xrpl.models.transactions import EscrowCreate, EscrowFinish
+from xrpl.utils import xrp_to_drops
+from .xrpl_client import XRPLClient
+from ..utils.validators import validate_xrpl_address, validate_xrp_amount, validate_fulfillment
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
 class EscrowService:
     def __init__(self):
-        self.xrpl_client = XRPLClient().client
+        self.xrpl_client = XRPLClient()
 
-    # =====================
-    # EscrowCreate
-    # =====================
-    def create_escrow(self, from_wallet: Optional[Wallet], to_address: str, amount_xrp: float, condition: Optional[str] = None, finish_after: Optional[int] = None) -> EscrowCreate:
-        if from_wallet:
-            validate_xrpl_address(from_wallet.classic_address)
+    # -----------------------------
+    # Create & submit escrow
+    # -----------------------------
+    def submit_escrow_create(
+        self,
+        from_wallet: Wallet,
+        to_address: str,
+        amount_xrp: float,
+        finish_after_seconds: int = 3600  # default 1 hour
+    ) -> dict:
+        validate_xrpl_address(from_wallet.classic_address)
         validate_xrpl_address(to_address)
         validate_xrp_amount(amount_xrp)
-        validate_condition(condition)
 
-        tx_params = {
-            "destination": to_address,
-            "amount": xrp_to_drops(amount_xrp)
-        }
-        if from_wallet:
-            tx_params["account"] = from_wallet.classic_address
-        if condition:
-            tx_params["condition"] = condition
-        if finish_after:
-            tx_params["finish_after"] = finish_after
+        # Compute finish_after in XRPL ledger time (seconds since 2000-01-01)
+        finish_after = int((datetime.utcnow() - datetime(2000, 1, 1)).total_seconds()) + finish_after_seconds
 
-        tx = EscrowCreate(**tx_params)
-        logger.info(f"Prepared EscrowCreate to {to_address}, amount={amount_xrp} XRP")
-        return tx
+        tx = EscrowCreate(
+            account=from_wallet.classic_address,
+            destination=to_address,
+            amount=xrp_to_drops(amount_xrp),
+            finish_after=finish_after
+        )
 
-    def submit_escrow_create(self, from_wallet: Wallet, to_address: str, amount_xrp: float, condition: Optional[str] = None, finish_after: Optional[int] = None) -> dict:
-        tx = self.create_escrow(from_wallet, to_address, amount_xrp, condition, finish_after)
-        try:
-            response = submit_and_wait(tx, self.xrpl_client, from_wallet)
-            logger.info(f"EscrowCreate submitted successfully. Hash: {response.result.get('hash')}")
-            return response.result
-        except Exception as e:
-            logger.error(f"Failed to submit EscrowCreate: {e}")
-            raise
+        logger.info(f"Submitting EscrowCreate: {amount_xrp} XRP from {from_wallet.classic_address} to {to_address}")
+        result = self.xrpl_client.submit(tx, from_wallet)
+        logger.info(f"EscrowCreate submitted successfully, tx_hash={result.get('hash')}")
+        return result
 
-    # =====================
-    # EscrowFinish
-    # =====================
-    def finish_escrow(self, owner_wallet: Optional[Wallet], offer_sequence: int, fulfillment: Optional[str] = None) -> EscrowFinish:
+    # -----------------------------
+    # Finish escrow
+    # -----------------------------
+    def submit_escrow_finish(
+        self,
+        owner_wallet: Wallet,
+        escrow_sequence: int,
+        fulfillment: str | None = None
+    ) -> dict:
         validate_fulfillment(fulfillment)
-        tx_params = {
-            "offer_sequence": offer_sequence
-        }
-        if owner_wallet:
-            tx_params["account"] = owner_wallet.classic_address
-            tx_params["owner"] = owner_wallet.classic_address
-        if fulfillment:
-            tx_params["fulfillment"] = fulfillment
-        
-        tx = EscrowFinish(**tx_params)
-        logger.info(f"Prepared EscrowFinish for offer_sequence={offer_sequence}")
-        return tx
 
-    def submit_escrow_finish(self, owner_wallet: Wallet, offer_sequence: int, fulfillment: Optional[str] = None) -> dict:
-        tx = self.finish_escrow(owner_wallet, offer_sequence, fulfillment)
-        try:
-            response = submit_and_wait(tx, self.xrpl_client, owner_wallet)
-            logger.info(f"EscrowFinish submitted successfully. Hash: {response.result.get('hash')}")
-            return response.result
-        except Exception as e:
-            logger.error(f"Failed to submit EscrowFinish: {e}")
-            raise
+        tx = EscrowFinish(
+            account=owner_wallet.classic_address,
+            owner=owner_wallet.classic_address,
+            offer_sequence=escrow_sequence,
+            fulfillment=fulfillment
+        )
 
-    # =====================
-    # EscrowCancel
-    # =====================
-    def cancel_escrow(self, owner_wallet: Optional[Wallet], offer_sequence: int) -> EscrowCancel:
-        tx_params = {
-            "offer_sequence": offer_sequence
-        }
-        if owner_wallet:
-            tx_params["account"] = owner_wallet.classic_address
-            tx_params["owner"] = owner_wallet.classic_address
-        
-        tx = EscrowCancel(**tx_params)
-        logger.info(f"Prepared EscrowCancel for offer_sequence={offer_sequence}")
-        return tx
-
-    def submit_escrow_cancel(self, owner_wallet: Wallet, offer_sequence: int) -> dict:
-        tx = self.cancel_escrow(owner_wallet, offer_sequence)
-        try:
-            response = submit_and_wait(tx, self.xrpl_client, owner_wallet)
-            logger.info(f"EscrowCancel submitted successfully. Hash: {response.result.get('hash')}")
-            return response.result
-        except Exception as e:
-            logger.error(f"Failed to submit EscrowCancel: {e}")
-            raise
+        logger.info(f"Submitting EscrowFinish for offer_sequence={escrow_sequence}")
+        result = self.xrpl_client.submit(tx, owner_wallet)
+        logger.info(f"EscrowFinish submitted successfully, tx_hash={result.get('hash')}")
+        return result

@@ -1,3 +1,4 @@
+# api/app/routes/liquidity.py
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -8,8 +9,14 @@ from datetime import datetime, timezone, timedelta
 from ..services.proof_verifier import ProofVerifier
 from ..services.credit_service import CreditService
 from ..services.escrow_service import EscrowService
+from ..services.bank_service import BankService
+from ..services.xrpl_client import XRPLClient
 from ..models.proof import ProofPayload as ProofPayloadModel
 from ..utils.validators import validate_xrpl_address
+
+from xrpl.transaction import autofill, submit_and_wait
+from xrpl.models.transactions import EscrowCreate, EscrowFinish
+from xrpl.utils import xrp_to_drops
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Liquidity"])
@@ -42,6 +49,11 @@ class LiquidityRequest(BaseModel):
             self.principal_did = f"did:xrpl:{self.principal_address}"
         return self
 
+class EscrowFinishRequest(BaseModel):
+    borrower_wallet: str = Field(..., min_length=25, max_length=35)
+    escrow_sequence: int = Field(..., gt=0)
+    owner_wallet: str = Field(..., min_length=25, max_length=35, description="Wallet address of the bank that created the escrow")
+
 # -------------------
 # Endpoints
 # -------------------
@@ -50,23 +62,23 @@ async def request_liquidity(req: LiquidityRequest):
     """
     Request liquidity: decentralized flow.
     
-    - Checks on-chain credit score (no trust line required)
+    - Checks on-chain credit score
     - AI agent auto-approves based on credit score
     - Returns prepared escrow transaction for bank to sign
     - Bank controls their wallet, signs their own escrow
-    
-    Architecture: Platform coordinates, banks control funds.
     """
     try:
         credit_svc = CreditService()
         escrow_svc = EscrowService()
+        bank_svc = BankService()
+        xrpl_client = XRPLClient()
         
+        # Step 1: Check eligibility
         eligibility = await run_in_threadpool(
             credit_svc.check_eligibility,
             req.principal_address,
             req.amount_xrp
         )
-        
         if not eligibility["eligible"]:
             return {
                 "status": "rejected",
@@ -74,6 +86,7 @@ async def request_liquidity(req: LiquidityRequest):
                 "credit": eligibility["credit"]
             }
         
+        # Step 2: Verify optional proof
         if req.proof_data:
             try:
                 proof_payload = ProofPayloadModel(**req.proof_data)
@@ -82,6 +95,7 @@ async def request_liquidity(req: LiquidityRequest):
             except Exception as e:
                 logger.warning(f"Proof verification failed: {e}")
         
+        # Step 3: Compute unlock timestamp
         if req.unlock_time:
             unlock_timestamp = int(req.unlock_time.timestamp())
         else:
@@ -89,21 +103,21 @@ async def request_liquidity(req: LiquidityRequest):
         
         logger.info(f"Liquidity request: address={req.principal_address}, amount={req.amount_xrp}, score={eligibility['credit']['score']}")
         
-        from ..services.bank_service import BankService
-        from ..services.xrpl_client import XRPLClient
-        from xrpl.transaction import autofill, submit_and_wait
-        from xrpl.models.transactions import EscrowCreate
-        from xrpl.utils import xrp_to_drops
-        
-        bank_svc = BankService()
+        # -----------------------------
+        # Step 4: Find a matching bank
+        # -----------------------------
+        # BankService is responsible for selecting eligible banks based on:
+        # - requested amount
+        # - borrower credit score
         matching_banks = await run_in_threadpool(
             bank_svc.find_matching_banks,
             req.amount_xrp,
             eligibility["credit"]["score"]
         )
         
-        xrpl_client = XRPLClient()
-        
+        # -----------------------------
+        # Step 5: Prepare escrow
+        # -----------------------------
         if matching_banks:
             best_bank = matching_banks[0]
             logger.info(f"Matched with bank: {best_bank['bank_name']} ({best_bank['wallet_address']})")
@@ -131,6 +145,7 @@ async def request_liquidity(req: LiquidityRequest):
                 "message": f"Matched with {best_bank['bank_name']}. Escrow transaction prepared for bank signing."
             }
         else:
+            # Fallback to platform wallet if no banks match
             logger.info("No banks matched, using platform wallet fallback")
             platform_wallet = xrpl_client._wallet
             
@@ -142,7 +157,7 @@ async def request_liquidity(req: LiquidityRequest):
             )
             
             prepared_tx = await run_in_threadpool(autofill, escrow_tx, xrpl_client.client)
-            response = await run_in_threadpool(submit_and_wait, prepared_tx, xrpl_client.client, platform_wallet)
+            response = await run_in_threadpool(xrpl_client.submit, prepared_tx, platform_wallet)
             
             tx_hash = response.result.get("hash")
             logger.info(f"Escrow created directly: {tx_hash}")
@@ -167,9 +182,7 @@ async def request_liquidity(req: LiquidityRequest):
 
 @router.get("/credit-score/{address}")
 async def get_credit_score(address: str):
-    """
-    Get credit score for an XRPL address.
-    """
+    """Get credit score for an XRPL address."""
     try:
         validate_xrpl_address(address)
         credit_svc = CreditService()
@@ -182,24 +195,14 @@ async def get_credit_score(address: str):
         raise HTTPException(status_code=500, detail="Failed to fetch credit score")
 
 
-class EscrowFinishRequest(BaseModel):
-    borrower_wallet: str = Field(..., min_length=25, max_length=35)
-    escrow_sequence: int = Field(..., gt=0)
-    owner_wallet: str = Field(..., min_length=25, max_length=35, description="Wallet address of the bank that created the escrow")
-
 @router.post("/finish-escrow")
 async def finish_escrow(req: EscrowFinishRequest):
     """Prepare EscrowFinish transaction for borrower to sign."""
     try:
         validate_xrpl_address(req.borrower_wallet)
         validate_xrpl_address(req.owner_wallet)
-        from ..services.escrow_service import EscrowService
-        from xrpl.transaction import autofill
-        from xrpl.models.transactions import EscrowFinish
-        from ..services.xrpl_client import XRPLClient
         
         xrpl_client = XRPLClient()
-        
         escrow_tx = EscrowFinish(
             account=req.borrower_wallet,
             owner=req.owner_wallet,
@@ -218,6 +221,7 @@ async def finish_escrow(req: EscrowFinishRequest):
     except Exception as e:
         logger.error(f"Escrow finish failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/verify-proof")
 async def verify_proof(proof_data: dict):
