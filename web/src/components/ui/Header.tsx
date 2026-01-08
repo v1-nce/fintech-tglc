@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import AppIcon from '../AppIcon';
@@ -8,78 +8,91 @@ import Button from './Button';
 import { useNavigation } from '@/context/NavigationContext';
 import { useWallet } from '@/lib/use-wallet';
 
-export default function Header() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const {
-    userRole,
-    toggleRole,
-    mobileMenuOpen,
-    setMobileMenuOpen,
-    transactionInProgress,
-    transactionStatus,
-  } = useNavigation();
-  const { address, isConnected, connect, disconnect } = useWallet();
-
-  const [quickActionOpen, setQuickActionOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const quickActionRef = useRef<HTMLDivElement>(null);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-
-  const agentNavItems = [
+const NAV_ITEMS = {
+  agent: [
     { label: 'Dashboard', path: '/agent-dashboard', icon: 'LayoutDashboard' },
     { label: 'Loans', path: '/loan-details', icon: 'FileText' },
     { label: 'Payments', path: '/payment-processing', icon: 'CreditCard' },
     { label: 'Create Loan', path: '/create-loan', icon: 'Plus' },
-  ];
-
-  const borrowerNavItems = [
+  ],
+  borrower: [
     { label: 'Dashboard', path: '/borrower-dashboard', icon: 'LayoutDashboard' },
     { label: 'Loans', path: '/loan-details', icon: 'FileText' },
     { label: 'Payments', path: '/payment-processing', icon: 'CreditCard' },
     { label: 'Credit', path: '/credit-profile', icon: 'TrendingUp' },
-  ];
+  ],
+};
 
-  const navigationItems = userRole === 'agent' ? agentNavItems : borrowerNavItems;
+const QUICK_ACTIONS = {
+  agent: [
+    { label: 'Create New Loan', path: '/create-loan', icon: 'Plus' },
+    { label: 'View Portfolio', path: '/agent-dashboard', icon: 'Briefcase' },
+  ],
+  borrower: [
+    { label: 'Make Payment', path: '/payment-processing', icon: 'CreditCard' },
+    { label: 'View Credit', path: '/credit-profile', icon: 'TrendingUp' },
+  ],
+};
 
-  const quickActions = userRole === 'agent'
-    ? [
-        { label: 'Create New Loan', path: '/create-loan', icon: 'Plus' },
-        { label: 'View Portfolio', path: '/agent-dashboard', icon: 'Briefcase' },
-      ]
-    : [
-        { label: 'Make Payment', path: '/payment-processing', icon: 'CreditCard' },
-        { label: 'View Credit', path: '/credit-profile', icon: 'TrendingUp' },
-      ];
+export default function Header() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { userRole, toggleRole, mobileMenuOpen, setMobileMenuOpen, transactionInProgress, transactionStatus } = useNavigation();
+  const { address, isConnected, connect, disconnect } = useWallet();
+
+  const [quickActionOpen, setQuickActionOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const quickActionRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const navItems = NAV_ITEMS[userRole];
+  const quickActions = QUICK_ACTIONS[userRole];
+  const truncateAddress = (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (quickActionRef.current && !quickActionRef.current.contains(event.target as Node)) {
-        setQuickActionOpen(false);
-      }
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
-        setUserMenuOpen(false);
-      }
+    const handleClickOutside = (e: MouseEvent) => {
+      if (quickActionRef.current && !quickActionRef.current.contains(e.target as Node)) setQuickActionOpen(false);
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleConnectWallet = async () => {
+  useEffect(() => {
+    if (isConnected) setConnecting(false);
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (!connecting) return;
+    const resetIfNotConnected = () => {
+      setTimeout(() => { if (!isConnected) setConnecting(false); }, 1500);
+    };
+    window.addEventListener('focus', resetIfNotConnected);
+    document.addEventListener('visibilitychange', resetIfNotConnected);
+    return () => {
+      window.removeEventListener('focus', resetIfNotConnected);
+      document.removeEventListener('visibilitychange', resetIfNotConnected);
+    };
+  }, [connecting, isConnected]);
+
+  const handleConnectWallet = useCallback(async () => {
+    if (connecting || isConnected) return;
+    setConnecting(true);
+    const timeout = setTimeout(() => setConnecting(false), 15000);
+    
     try {
       await connect('crossmark');
-    } catch (error) {
-      console.error('Connection failed:', error);
+    } catch (e) {
+      const msg = String(e).toLowerCase();
+      if (!['rejected', 'cancelled', 'canceled', 'user'].some(k => msg.includes(k))) {
+        console.error('Connection failed:', e);
+      }
+    } finally {
+      clearTimeout(timeout);
+      setConnecting(false);
     }
-  };
-
-  const truncateAddress = (addr: string) => {
-    if (!addr) return '';
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
-
-  const isActivePath = (path: string) => pathname === path;
+  }, [connecting, isConnected, connect]);
 
   return (
     <>
@@ -91,12 +104,12 @@ export default function Header() {
             </Link>
 
             <nav className="hidden lg:flex items-center gap-1">
-              {navigationItems.map((item) => (
+              {navItems.map((item) => (
                 <Link
                   key={item.path}
                   href={item.path}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-smooth ${
-                    isActivePath(item.path)
+                    pathname === item.path
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
@@ -111,9 +124,7 @@ export default function Header() {
           <div className="flex items-center gap-3">
             {transactionInProgress && (
               <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-muted/30 rounded-lg border border-border">
-                <div className="animate-spin">
-                  <AppIcon name="Loader2" size={16} className="text-primary" />
-                </div>
+                <div className="animate-spin"><AppIcon name="Loader2" size={16} className="text-primary" /></div>
                 <span className="text-sm text-muted-foreground">
                   {transactionStatus?.type === 'payment' ? 'Processing Payment...' : 'Processing...'}
                 </span>
@@ -121,24 +132,15 @@ export default function Header() {
             )}
 
             <div className="relative" ref={quickActionRef}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setQuickActionOpen(!quickActionOpen)}
-                className="hidden md:flex"
-              >
+              <Button variant="ghost" size="icon" onClick={() => setQuickActionOpen(!quickActionOpen)} className="hidden md:flex">
                 <AppIcon name="Zap" size={20} />
               </Button>
-
               {quickActionOpen && (
                 <div className="absolute right-0 top-full mt-2 w-56 bg-popover border border-border rounded-lg shadow-glow-lg animate-slide-down overflow-hidden">
                   {quickActions.map((action) => (
                     <button
                       key={action.path}
-                      onClick={() => {
-                        router.push(action.path);
-                        setQuickActionOpen(false);
-                      }}
+                      onClick={() => { router.push(action.path); setQuickActionOpen(false); }}
                       className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-popover-foreground hover:bg-muted/50 transition-smooth"
                     >
                       <AppIcon name={action.icon} size={18} />
@@ -150,11 +152,7 @@ export default function Header() {
             </div>
 
             <div className="relative" ref={userMenuRef}>
-              <Button
-                variant="outline"
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="hidden md:flex items-center gap-2"
-              >
+              <Button variant="outline" onClick={() => setUserMenuOpen(!userMenuOpen)} className="hidden md:flex items-center gap-2">
                 <AppIcon name="User" size={18} />
                 <span className="text-sm font-medium capitalize">{userRole}</span>
                 <AppIcon name="ChevronDown" size={16} />
@@ -176,10 +174,7 @@ export default function Header() {
                   </div>
 
                   <button
-                    onClick={() => {
-                      toggleRole();
-                      setUserMenuOpen(false);
-                    }}
+                    onClick={() => { toggleRole(); setUserMenuOpen(false); }}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-popover-foreground hover:bg-muted/50 transition-smooth"
                   >
                     <AppIcon name="RefreshCw" size={18} />
@@ -188,10 +183,7 @@ export default function Header() {
 
                   {isConnected ? (
                     <button
-                      onClick={() => {
-                        disconnect();
-                        setUserMenuOpen(false);
-                      }}
+                      onClick={() => { disconnect(); setUserMenuOpen(false); }}
                       className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-destructive hover:bg-destructive/10 transition-smooth"
                     >
                       <AppIcon name="LogOut" size={18} />
@@ -199,43 +191,36 @@ export default function Header() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => {
-                        handleConnectWallet();
-                        setUserMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-success hover:bg-success/10 transition-smooth"
+                      onClick={() => { handleConnectWallet(); setUserMenuOpen(false); }}
+                      disabled={connecting}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-success hover:bg-success/10 transition-smooth disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <AppIcon name="Wallet" size={18} />
-                      <span>Connect Wallet</span>
+                      <AppIcon name={connecting ? 'Loader2' : 'Wallet'} size={18} className={connecting ? 'animate-spin' : ''} />
+                      <span>{connecting ? 'Connecting...' : 'Connect Wallet'}</span>
                     </button>
                   )}
                 </div>
               )}
             </div>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden"
-            >
+            <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden">
               <AppIcon name={mobileMenuOpen ? 'X' : 'Menu'} size={24} />
             </Button>
           </div>
         </div>
       </header>
+
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[999] lg:hidden">
           <div className="absolute inset-0 bg-background" onClick={() => setMobileMenuOpen(false)} />
-
           <div className="absolute top-16 left-0 right-0 bottom-0 bg-card border-t border-border shadow-glow-xl animate-slide-down overflow-y-auto">
             <nav className="p-6 space-y-2">
-              {navigationItems.map((item) => (
+              {navItems.map((item) => (
                 <Link
                   key={item.path}
                   href={item.path}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-smooth ${
-                    isActivePath(item.path)
+                    pathname === item.path
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
@@ -264,18 +249,20 @@ export default function Header() {
               </Button>
 
               {isConnected ? (
-                <Button
-                  variant="destructive"
-                  fullWidth
-                  iconName="LogOut"
-                  iconPosition="left"
-                  onClick={disconnect}
-                >
+                <Button variant="destructive" fullWidth iconName="LogOut" iconPosition="left" onClick={disconnect}>
                   Disconnect Wallet
                 </Button>
               ) : (
-                <Button variant="default" fullWidth iconName="Wallet" iconPosition="left" onClick={handleConnectWallet}>
-                  Connect Wallet
+                <Button 
+                  variant="default" 
+                  fullWidth 
+                  iconName={connecting ? 'Loader2' : 'Wallet'} 
+                  iconPosition="left" 
+                  onClick={handleConnectWallet}
+                  disabled={connecting}
+                  loading={connecting}
+                >
+                  {connecting ? 'Connecting...' : 'Connect Wallet'}
                 </Button>
               )}
             </div>
@@ -285,4 +272,3 @@ export default function Header() {
     </>
   );
 }
-

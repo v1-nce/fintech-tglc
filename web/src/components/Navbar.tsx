@@ -1,19 +1,50 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/lib/use-wallet';
 import { Button } from './ui';
 import AppIcon from './AppIcon';
 
 export function Navbar() {
   const { address, isConnected, connect, disconnect } = useWallet();
+  const [connecting, setConnecting] = useState(false);
 
-  const handleConnect = async () => {
+  useEffect(() => {
+    if (isConnected) setConnecting(false);
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (!connecting) return;
+
+    const resetIfNotConnected = () => {
+      setTimeout(() => { if (!isConnected) setConnecting(false); }, 1500);
+    };
+
+    window.addEventListener('focus', resetIfNotConnected);
+    document.addEventListener('visibilitychange', resetIfNotConnected);
+    return () => {
+      window.removeEventListener('focus', resetIfNotConnected);
+      document.removeEventListener('visibilitychange', resetIfNotConnected);
+    };
+  }, [connecting, isConnected]);
+
+  const handleConnect = useCallback(async () => {
+    if (connecting || isConnected) return;
+    setConnecting(true);
+    const timeout = setTimeout(() => setConnecting(false), 15000);
+    
     try {
       await connect('crossmark');
-    } catch (error) {
-      console.error('Connection failed:', error);
+    } catch (e) {
+      const msg = String(e).toLowerCase();
+      if (!['rejected', 'cancelled', 'canceled', 'user'].some(k => msg.includes(k))) {
+        console.error('Connection failed:', e);
+      }
+    } finally {
+      clearTimeout(timeout);
+      setConnecting(false);
     }
-  };
+  }, [connecting, isConnected, connect]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-[1000] bg-card border-b border-border shadow-glow-md">
@@ -29,18 +60,24 @@ export function Navbar() {
           {isConnected && address ? (
             <>
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-muted/30 rounded-lg border border-border">
-                <div className="w-2 h-2 bg-success rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-success rounded-full animate-pulse" />
                 <span className="text-sm font-mono text-foreground">
                   {address.slice(0, 6)}...{address.slice(-4)}
                 </span>
               </div>
-              <Button variant="outline" size="sm" onClick={disconnect}>
-                Disconnect
-              </Button>
+              <Button variant="outline" size="sm" onClick={disconnect}>Disconnect</Button>
             </>
           ) : (
-            <Button variant="default" size="sm" onClick={handleConnect} iconName="Wallet" iconPosition="left">
-              Connect Crossmark
+            <Button 
+              variant="default" 
+              size="sm" 
+              onClick={handleConnect} 
+              iconName={connecting ? 'Loader2' : 'Wallet'} 
+              iconPosition="left"
+              disabled={connecting}
+              loading={connecting}
+            >
+              {connecting ? 'Connecting...' : 'Connect Crossmark'}
             </Button>
           )}
         </div>
@@ -48,4 +85,3 @@ export function Navbar() {
     </nav>
   );
 }
-
