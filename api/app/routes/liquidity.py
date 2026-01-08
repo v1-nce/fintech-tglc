@@ -24,6 +24,18 @@ router = APIRouter(tags=["Liquidity"])
 DEFAULT_ESCROW_DAYS = 30  # Repayment deadline (not when funds are available)
 MAX_XRP_AMOUNT = 1_000_000_000
 
+# XRPL Explorer URLs by network
+EXPLORER_URLS = {
+    "mainnet": "https://xrpl.org/transactions/",
+    "testnet": "https://testnet.xrpl.org/transactions/",
+    "devnet": "https://testnet.xrpl.org/transactions/",
+}
+
+# Get network from environment (default to testnet)
+import os
+XRPL_NETWORK = os.getenv("XRPL_NETWORK", "testnet")
+EXPLORER_BASE_URL = EXPLORER_URLS.get(XRPL_NETWORK, EXPLORER_URLS["testnet"])
+
 # -------------------
 # Pydantic Models
 # -------------------
@@ -162,7 +174,8 @@ async def request_liquidity(req: LiquidityRequest):
                     "name": best_bank["bank_name"],
                     "wallet": best_bank["wallet_address"]
                 },
-                "message": f"Matched with {best_bank['bank_name']}. Escrow transaction prepared for bank signing."
+                "explorer_url_template": EXPLORER_BASE_URL + "{tx_hash}",
+                "message": f"Matched with {best_bank['bank_name']}. Escrow transaction prepared for bank signing. After signing, view the transaction at: {EXPLORER_BASE_URL}<tx_hash>"
             }
         else:
             # Fallback to platform wallet if no banks match
@@ -182,13 +195,17 @@ async def request_liquidity(req: LiquidityRequest):
             tx_hash = response.get("hash")
             logger.info(f"Escrow created directly: {tx_hash}")
             
+            transaction_url = f"{EXPLORER_BASE_URL}{tx_hash}" if tx_hash else None
+            
             return {
                 "status": "approved",
                 "tx_hash": tx_hash,
                 "amount_xrp": req.amount_xrp,
                 "credit": eligibility["credit"],
                 "unlock_timestamp": unlock_timestamp,
-                "message": "Escrow created successfully. Funds will be available after unlock time."
+                "transaction_url": transaction_url,
+                "explorer_url": transaction_url,
+                "message": f"Escrow created successfully. Funds will be available after unlock time. View receipt: {transaction_url}"
             }
 
     except HTTPException:
