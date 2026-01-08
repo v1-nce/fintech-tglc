@@ -11,7 +11,7 @@ from ..utils.validators import validate_xrpl_address
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 BANKS_FILE = DATA_DIR / "banks.json"
 
 _banks: Dict[str, Dict] = {}
