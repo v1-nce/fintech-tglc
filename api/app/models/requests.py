@@ -15,6 +15,7 @@ class LiquidityRequest(BaseModel):
     - Standardises liquidity requests for automated, auditable, and policy-compliant processing.
     """
     business_id: str
+    principal_address: str
     requested_amount: float
-    unlock_timestamp: datetime # For escrow
+    unlock_timestamp: datetime
     metrics: Dict[str, float]

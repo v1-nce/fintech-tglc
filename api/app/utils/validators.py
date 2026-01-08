@@ -20,7 +20,9 @@ def validate_amount(amount: str) -> str:
 
 
 def validate_currency(currency: str) -> str:
-    if not isinstance(currency, str) or not re.fullmatch(r"[A-Z0-9]{3,40}", currency):
+    # XRPL allows 3-char codes OR longer hex-encoded strings
+    # For convenience, we allow alphanumeric + underscore (will be hex-encoded if > 3 chars)
+    if not isinstance(currency, str) or not re.fullmatch(r"[A-Z0-9_]{3,40}", currency):
         raise ValueError(f"Invalid XRPL issued currency: {currency}")
     return currency
 

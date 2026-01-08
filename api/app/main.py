@@ -4,7 +4,6 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import logging
-from .routes.router import router as api_router
 
 load_dotenv()
 
@@ -23,11 +22,41 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-app.include_router(api_router)
+# Import and include routers directly with full paths
+from .routes.liquidity import router as liquidity_router
+from .routes.credentials import router as credentials_router
+from .routes.banks import router as banks_router
+
+app.include_router(liquidity_router, prefix="/api/liquidity")
+app.include_router(credentials_router, prefix="/api/credentials")
+app.include_router(banks_router, prefix="/api/banks")
+
+# Log all registered routes on startup
+@app.on_event("startup")
+async def startup_event():
+    logger.info("=" * 60)
+    logger.info("REGISTERED ROUTES:")
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            methods = ', '.join(sorted(route.methods))
+            logger.info(f"  {methods:15} {route.path}")
+    logger.info("=" * 60)
+
+# Debug middleware to log all requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f">>> INCOMING: {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        logger.info(f"<<< RESPONSE: {response.status_code} for {request.url.path}")
+        return response
+    except Exception as e:
+        logger.error(f"ERROR in {request.url.path}: {e}", exc_info=True)
+        raise
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -56,3 +85,4 @@ def health_check():
         "network": os.getenv("XRPL_NETWORK", "testnet"),
         "issuer_configured": bool(os.getenv("ISSUER_SEED"))
     }
+
