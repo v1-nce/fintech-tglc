@@ -68,4 +68,4 @@ This repository contains the infrastructure enabling:
 
 ## Takeaway
 
-TGLC delivers a **programmable, capital-efficient, and privacy-preserving liquidity framework**. Banks supply liquidity, businesses delegate via AI agents, and this platform ensures trust, compliance, and automated execution—all on the XRPL.
+TGLC delivers a **programmable, capital-efficient, and privacy-preserving liquidity framework**. Banks supply liquidity, businesses delegate via AI agents, and this platform ensures trust, compliance, and automated execution—all on the XRPL
