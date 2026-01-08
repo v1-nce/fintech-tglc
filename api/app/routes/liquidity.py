@@ -30,7 +30,7 @@ class LiquidityRequest(BaseModel):
         return validate_xrpl_address(v)
 
 @router.post("/request")
-async def request_liquidity(req: LiquidityRequest, background_tasks: BackgroundTasks):
+async def request_liquidity(req: LiquidityRequest):
     try:
         verifier = ProofVerifier()
         proof_result = await run_in_threadpool(
@@ -42,19 +42,19 @@ async def request_liquidity(req: LiquidityRequest, background_tasks: BackgroundT
         # BackgroundTasks is used as a temporary async mechanism.
         # In production, this will be replaced with a durable task queue.
         agent = AgentBot()
-        background_tasks.add_task(
-            agent.evaluate,
+        result = agent.evaluate(
             req.principal_did,
             req.principal_address,
             req.amount_xrp,
             proof_result
         )
         
-        proof_verified = bool(proof_result["valid"]) if proof_result else None
-        return {
-            "status": "processing",
-            "proof_verified": proof_verified
-        }
+        if result.get("status") == "rejected":
+            raise HTTPException(status_code=400, detail=result.get("reason", "Request rejected"))
+        
+        return result
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
