@@ -8,7 +8,7 @@ from xrpl.clients import JsonRpcClient
 from xrpl.wallet import Wallet
 from xrpl.transaction import submit_and_wait
 from xrpl.models.transactions import TrustSet, Payment, EscrowCreate, EscrowFinish, Clawback
-from xrpl.models.requests import AccountInfo, AccountTx
+from xrpl.models.requests import AccountInfo, AccountLines, AccountTx
 
 # ============================
 # Load environment variables
@@ -120,14 +120,33 @@ class XRPLClient:
     # =========================================================
     # Convenience helpers
     # =========================================================
-    def get_account_info(self):
-        """Return basic account info for the platform wallet."""
+    def get_account_info(self, account: str = None):
+        """Return basic account info for an account (defaults to platform wallet)."""
         try:
-            req = AccountInfo(account=self.address, ledger_index="validated")
+            target_account = account or self.address
+            req = AccountInfo(account=target_account, ledger_index="validated")
             response = self._client.request(req)
             return response.result
         except Exception as e:
             raise XRPLClientError(f"Failed to fetch account info: {e}") from e
+
+    def get_account_lines(self, account: str) -> list:
+        """Get trust lines for an account."""
+        try:
+            req = AccountLines(account=account, ledger_index="validated")
+            response = self._client.request(req)
+            return response.result.get("lines", [])
+        except Exception as e:
+            raise XRPLClientError(f"Failed to fetch account lines: {e}") from e
+
+    def get_account_transactions(self, account: str, limit: int = 20) -> list:
+        """Get recent transactions for an account."""
+        try:
+            req = AccountTx(account=account, ledger_index_max=-1, limit=limit)
+            response = self._client.request(req)
+            return response.result.get("transactions", [])
+        except Exception as e:
+            raise XRPLClientError(f"Failed to fetch account transactions: {e}") from e
 
     # -------------------------
     # Trustline
