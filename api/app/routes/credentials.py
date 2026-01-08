@@ -3,12 +3,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from ..services.credential_service import CredentialService
+from ..services.credit_service import CreditService
 from ..utils.validators import validate_xrpl_address
 import logging
 import re
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/credentials", tags=["Credentials"])
+router = APIRouter(tags=["Credentials"])
 
 # -------------------
 # Utilities
@@ -68,3 +69,20 @@ async def issue_credential(req: IssueRequest):
     except Exception as e:
         logger.error(f"Credential issuance failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/score/{address}")
+async def get_credit_score(address: str):
+    """
+    Get credit score for an XRPL address.
+    """
+    try:
+        validate_xrpl_address(address)
+        credit_svc = CreditService()
+        credit = await run_in_threadpool(credit_svc.get_credit_score, address)
+        return credit
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Credit score fetch failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch credit score")

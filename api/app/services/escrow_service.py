@@ -21,23 +21,30 @@ class EscrowService:
     # =====================
     # EscrowCreate
     # =====================
-    def create_escrow(self, from_wallet: Wallet, to_address: str, amount_xrp: float, condition: Optional[str] = None) -> EscrowCreate:
-        validate_xrpl_address(from_wallet.classic_address)
+    def create_escrow(self, from_wallet: Optional[Wallet], to_address: str, amount_xrp: float, condition: Optional[str] = None, finish_after: Optional[int] = None) -> EscrowCreate:
+        if from_wallet:
+            validate_xrpl_address(from_wallet.classic_address)
         validate_xrpl_address(to_address)
         validate_xrp_amount(amount_xrp)
         validate_condition(condition)
 
-        tx = EscrowCreate(
-            account=from_wallet.classic_address,
-            destination=to_address,
-            amount=xrp_to_drops(amount_xrp),
-            condition=condition
-        )
-        logger.info(f"Prepared EscrowCreate from {from_wallet.classic_address} to {to_address}, amount={amount_xrp} XRP")
+        tx_params = {
+            "destination": to_address,
+            "amount": xrp_to_drops(amount_xrp)
+        }
+        if from_wallet:
+            tx_params["account"] = from_wallet.classic_address
+        if condition:
+            tx_params["condition"] = condition
+        if finish_after:
+            tx_params["finish_after"] = finish_after
+
+        tx = EscrowCreate(**tx_params)
+        logger.info(f"Prepared EscrowCreate to {to_address}, amount={amount_xrp} XRP")
         return tx
 
-    def submit_escrow_create(self, from_wallet: Wallet, to_address: str, amount_xrp: float, condition: Optional[str] = None) -> dict:
-        tx = self.create_escrow(from_wallet, to_address, amount_xrp, condition)
+    def submit_escrow_create(self, from_wallet: Wallet, to_address: str, amount_xrp: float, condition: Optional[str] = None, finish_after: Optional[int] = None) -> dict:
+        tx = self.create_escrow(from_wallet, to_address, amount_xrp, condition, finish_after)
         try:
             response = submit_and_wait(tx, self.xrpl_client, from_wallet)
             logger.info(f"EscrowCreate submitted successfully. Hash: {response.result.get('hash')}")
@@ -49,15 +56,19 @@ class EscrowService:
     # =====================
     # EscrowFinish
     # =====================
-    def finish_escrow(self, owner_wallet: Wallet, offer_sequence: int, fulfillment: Optional[str] = None) -> EscrowFinish:
+    def finish_escrow(self, owner_wallet: Optional[Wallet], offer_sequence: int, fulfillment: Optional[str] = None) -> EscrowFinish:
         validate_fulfillment(fulfillment)
-        tx = EscrowFinish(
-            account=owner_wallet.classic_address,
-            owner=owner_wallet.classic_address,
-            offer_sequence=offer_sequence,
-            fulfillment=fulfillment
-        )
-        logger.info(f"Prepared EscrowFinish for offer_sequence={offer_sequence} by {owner_wallet.classic_address}")
+        tx_params = {
+            "offer_sequence": offer_sequence
+        }
+        if owner_wallet:
+            tx_params["account"] = owner_wallet.classic_address
+            tx_params["owner"] = owner_wallet.classic_address
+        if fulfillment:
+            tx_params["fulfillment"] = fulfillment
+        
+        tx = EscrowFinish(**tx_params)
+        logger.info(f"Prepared EscrowFinish for offer_sequence={offer_sequence}")
         return tx
 
     def submit_escrow_finish(self, owner_wallet: Wallet, offer_sequence: int, fulfillment: Optional[str] = None) -> dict:
@@ -73,13 +84,16 @@ class EscrowService:
     # =====================
     # EscrowCancel
     # =====================
-    def cancel_escrow(self, owner_wallet: Wallet, offer_sequence: int) -> EscrowCancel:
-        tx = EscrowCancel(
-            account=owner_wallet.classic_address,
-            owner=owner_wallet.classic_address,
-            offer_sequence=offer_sequence
-        )
-        logger.info(f"Prepared EscrowCancel for offer_sequence={offer_sequence} by {owner_wallet.classic_address}")
+    def cancel_escrow(self, owner_wallet: Optional[Wallet], offer_sequence: int) -> EscrowCancel:
+        tx_params = {
+            "offer_sequence": offer_sequence
+        }
+        if owner_wallet:
+            tx_params["account"] = owner_wallet.classic_address
+            tx_params["owner"] = owner_wallet.classic_address
+        
+        tx = EscrowCancel(**tx_params)
+        logger.info(f"Prepared EscrowCancel for offer_sequence={offer_sequence}")
         return tx
 
     def submit_escrow_cancel(self, owner_wallet: Wallet, offer_sequence: int) -> dict:
