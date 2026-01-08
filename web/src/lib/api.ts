@@ -69,6 +69,20 @@ export interface ProofVerificationResponse {
   default_rate?: number;
 }
 
+export interface Payment {
+  id: string;
+  date: string;
+  time: string;
+  amount: number;
+  type: string;
+  status: string;
+  txHash: string;
+}
+
+export interface PaymentHistoryResponse {
+  payments: Payment[];
+}
+
 function validateXrplAddress(address: string): boolean {
   return /^r[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(address);
 }
@@ -182,6 +196,16 @@ class APIClient {
     });
   }
 
+  async fetchPaymentHistory(
+    address: string,
+    limit = 50
+  ): Promise<PaymentHistoryResponse[]> {
+    return this.request<PaymentHistoryResponse[]>(
+      `/api/payments/history?address=${encodeURIComponent(
+        address
+      )}&limit=${limit}`
+    );
+ 
   async getCreditScore(address: string): Promise<CreditScore> {
     if (!validateXrplAddress(address)) {
       throw new Error("Invalid XRPL address format");
