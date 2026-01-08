@@ -1,0 +1,17 @@
+[
+  {
+    "bank_id": "bank001",
+    "bank_name": "Bank Alpha",
+    "wallet_address": "r3XMTXC5t4geUiXCmnYoMk5GwU8F6m3aAZ",
+    "issued_tokens": [
+      { "currency": "USD", "issuer": "r3XMTXC5t4geUiXCmnYoMk5GwU8F6m3aAZ" }
+    ],
+    "credit_policy": {
+      "min": 1,
+      "max": 10000,
+      "risk_score_threshold": 300
+    },
+    "trustlines": [],
+    "active": true
+  }
+]

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime, timezone
 
 class LiquidityRequest(BaseModel):
@@ -15,7 +15,7 @@ class LiquidityRequest(BaseModel):
     - Standardises liquidity requests for automated, auditable, and policy-compliant processing.
     """
     business_id: str
-    principal_address: str
     requested_amount: float
-    unlock_timestamp: datetime
-    metrics: Dict[str, float]
+    metrics: Dict
+    unlock_time: datetime
+    eligible_banks: List[Dict] = []

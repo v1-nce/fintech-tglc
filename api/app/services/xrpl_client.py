@@ -1,3 +1,4 @@
+# api/services/xrpl_client.py
 import os
 import threading
 from pathlib import Path
@@ -16,17 +17,13 @@ from xrpl.models.requests import AccountInfo, AccountLines, AccountTx
 BASE_DIR = Path(__file__).resolve().parents[2]  # /api
 load_dotenv(BASE_DIR / ".env")
 
-
 # =====================
 # Exceptions
 # =====================
 class XRPLClientError(Exception):
-    """Base exception for XRPL client errors."""
     pass
 
-
 class XRPLSubmissionError(XRPLClientError):
-    """Raised when a transaction submission fails."""
     pass
 
 # =====================
@@ -38,19 +35,9 @@ def xrpl_time_to_datetime(xrpl_time: int) -> datetime:
     return XRPL_EPOCH + timedelta(seconds=xrpl_time)
 
 # =====================
-# XRPL Client
+# XRPL Client Singleton
 # =====================
 class XRPLClient:
-    """
-    Singleton gateway to the XRP Ledger.
-
-    Responsibilities:
-    - Manage network connection
-    - Manage signing wallet
-    - Submit transactions
-    - Provide convenience helpers: trustlines, payments, escrow, clawback
-    """
-
     _instance = None
     _lock = threading.Lock()
 
@@ -63,152 +50,69 @@ class XRPLClient:
         return cls._instance
 
     def _init(self):
-        # -------------------------
-        # Network configuration
-        # -------------------------
         network = os.getenv("XRPL_NETWORK", "testnet").lower()
-        if network == "mainnet":
-            rpc_url = "https://xrplcluster.com/"
-        elif network == "testnet":
-            rpc_url = "https://s.altnet.rippletest.net:51234/"
-        elif network == "devnet":
-            rpc_url = "https://s.devnet.rippletest.net:51234/"
-        else:
-            raise ValueError(f"Unsupported XRPL_NETWORK: {network}")
+        rpc_urls = {
+            "mainnet": "https://xrplcluster.com/",
+            "testnet": "https://s.altnet.rippletest.net:51234/",
+            "devnet": "https://s.devnet.rippletest.net:51234/"
+        }
+        self._client = JsonRpcClient(rpc_urls.get(network, rpc_urls["testnet"]))
 
-        self._client = JsonRpcClient(rpc_url)
-
-        # -------------------------
-        # Wallet / signer
-        # -------------------------
         seed = os.getenv("ISSUER_SEED")
         if not seed:
-            raise RuntimeError("ISSUER_SEED is not set in environment")
+            raise RuntimeError("ISSUER_SEED is not set")
         self._wallet = Wallet.from_seed(seed)
-        self._network = network
 
-    # =========================================================
-    # Properties
-    # =========================================================
     @property
     def client(self) -> JsonRpcClient:
         return self._client
 
     @property
-    def network(self) -> str:
-        return self._network
+    def wallet(self) -> Wallet:
+        return self._wallet
 
     @property
     def address(self) -> str:
         return self._wallet.classic_address
 
-    # =========================================================
-    # Core submit
-    # =========================================================
-    def submit(self, tx):
-        """Sign and submit a transaction to XRPL."""
+    # -------------------------
+    # Core submit helper
+    # -------------------------
+    def submit(self, tx, wallet: Wallet | None = None) -> dict:
+        wallet_to_use = wallet or self._wallet
         try:
-            result = submit_and_wait(tx, self._client, self._wallet)
+            result = submit_and_wait(tx, self._client, wallet_to_use)
             if not result.is_successful():
                 raise XRPLSubmissionError(f"Transaction failed: {result.result}")
-            return result
-        except XRPLSubmissionError:
-            raise
+            return result.result
         except Exception as e:
             raise XRPLSubmissionError(f"XRPL submission error: {e}") from e
 
-    # =========================================================
-    # Convenience helpers
-    # =========================================================
-    def get_account_info(self, account: str = None):
-        """Return basic account info for an account (defaults to platform wallet)."""
+    # -------------------------
+    # Account info / transactions
+    # -------------------------
+    def get_account_info(self, address: str | None = None) -> dict:
         try:
-            target_account = account or self.address
-            req = AccountInfo(account=target_account, ledger_index="validated")
+            req = AccountInfo(account=address or self.address, ledger_index="validated")
             response = self._client.request(req)
             return response.result
         except Exception as e:
             raise XRPLClientError(f"Failed to fetch account info: {e}") from e
 
-    def get_account_lines(self, account: str) -> list:
-        """Get trust lines for an account."""
+    def get_account_lines(self, address: str) -> list:
         try:
-            req = AccountLines(account=account, ledger_index="validated")
+            req = AccountLines(account=address, ledger_index="validated")
             response = self._client.request(req)
             return response.result.get("lines", [])
         except Exception as e:
             raise XRPLClientError(f"Failed to fetch account lines: {e}") from e
 
-    def get_account_transactions(self, account: str, limit: int = 20) -> list:
-        """Get recent transactions for an account."""
-        try:
-            req = AccountTx(account=account, ledger_index_max=-1, limit=limit)
-            response = self._client.request(req)
-            return response.result.get("transactions", [])
-        except Exception as e:
-            raise XRPLClientError(f"Failed to fetch account transactions: {e}") from e
-
-    # -------------------------
-    # Trustline
-    # -------------------------
-    def set_trustline(self, account: str, limit_amount: float, currency: str,
-                      issuer: str, expiration: datetime | None = None) -> dict:
-        """Set or update a TrustLine for a business account."""
-        try:
-            tx = TrustSet(
-                account=account,
-                limit_amount={
-                    "currency": currency,
-                    "issuer": issuer,
-                    "value": str(limit_amount)
-                }
-            )
-            response = self.submit(tx)
-            result = response.result
-            if expiration:
-                result["expires_at"] = expiration.isoformat()
-            return result
-        except Exception as e:
-            raise XRPLSubmissionError(f"Failed to set TrustLine: {e}") from e
-
-    # -------------------------
-    # Payment
-    # -------------------------
-    def submit_payment(self, destination: str, amount: float, currency: str = "XRP") -> dict:
-        """Submit a payment to a destination account."""
-        try:
-            tx = Payment(
-                account=self.address,
-                amount=str(amount) if currency.upper() == "XRP" else {
-                    "currency": currency,
-                    "issuer": self.address,
-                    "value": str(amount)
-                },
-                destination=destination
-            )
-            response = self.submit(tx)
-            return response.result
-        except Exception as e:
-            raise XRPLSubmissionError(f"Failed to submit payment: {e}") from e
-
-    # -------------------------
-    # Transaction history
-    # -------------------------
     def get_account_transactions(
         self,
         address: str | None = None,
         limit: int = 50,
         marker: dict | None = None
     ) -> dict:
-        """
-        Fetch validated transactions for an account.
-
-        Returns raw XRPL response:
-        {
-            "transactions": [...],
-            "marker": {...} | None
-        }
-        """
         try:
             req = AccountTx(
                 account=address or self.address,
@@ -219,61 +123,134 @@ class XRPLClient:
                 binary=False,
                 forward=False
             )
-
             response = self._client.request(req)
             return {
                 "transactions": response.result.get("transactions", []),
                 "marker": response.result.get("marker")
             }
-
         except Exception as e:
-            raise XRPLClientError(
-                f"Failed to fetch account transactions: {e}"
-            ) from e
+            raise XRPLClientError(f"Failed to fetch account transactions: {e}") from e
 
+    # -------------------------
+    # Trustline
+    # -------------------------
+    def set_trustline(
+        self,
+        account: str,
+        limit_amount: float,
+        currency: str,
+        issuer: str,
+        expiration: datetime | None = None,
+        wallet: Wallet | None = None
+    ) -> dict:
+        wallet_to_use = wallet or self._wallet
+        try:
+            tx = TrustSet(
+                account=account,
+                limit_amount={
+                    "currency": currency,
+                    "issuer": issuer,
+                    "value": str(limit_amount)
+                }
+            )
+            result = self.submit(tx, wallet_to_use)
+            if expiration:
+                result["expires_at"] = expiration.isoformat()
+            return result
+        except Exception as e:
+            raise XRPLSubmissionError(f"Failed to set TrustLine: {e}") from e
+
+    # -------------------------
+    # Payment
+    # -------------------------
+    def submit_payment(
+        self,
+        destination: str,
+        amount: float,
+        currency: str = "XRP",
+        wallet: Wallet | None = None
+    ) -> dict:
+        wallet_to_use = wallet or self._wallet
+        try:
+            if currency.upper() == "XRP":
+                amount_value = str(int(amount * 1_000_000))  # convert XRP to drops
+            else:
+                amount_value = {"currency": currency, "issuer": wallet_to_use.classic_address, "value": str(amount)}
+
+            tx = Payment(
+                account=wallet_to_use.classic_address,
+                amount=amount_value,
+                destination=destination
+            )
+            return self.submit(tx, wallet_to_use)
+        except Exception as e:
+            raise XRPLSubmissionError(f"Failed to submit payment: {e}") from e
 
     # -------------------------
     # Escrow
     # -------------------------
-    def create_escrow(self, destination: str, amount: float, finish_after: int) -> dict:
-        """Lock funds in escrow until finish_after (Unix timestamp)."""
+    def create_escrow(
+        self,
+        destination: str,
+        amount: float,
+        finish_after: int,  # Unix timestamp
+        wallet: Wallet | None = None
+    ) -> dict:
+        wallet_to_use = wallet or self._wallet
         try:
             tx = EscrowCreate(
-                account=self.address,
+                account=wallet_to_use.classic_address,
                 destination=destination,
-                amount=str(amount),
+                amount=str(int(amount * 1_000_000)),  # convert XRP to drops
                 finish_after=finish_after
             )
-            response = self.submit(tx)
-            return response.result
+            return self.submit(tx, wallet_to_use)
         except Exception as e:
             raise XRPLSubmissionError(f"Failed to create escrow: {e}") from e
 
-    def finish_escrow(self, owner: str, escrow_sequence: int) -> dict:
-        """Release funds from escrow."""
+    def finish_escrow(
+        self,
+        owner: str,
+        escrow_sequence: int,
+        wallet: Wallet | None = None
+    ) -> dict:
+        wallet_to_use = wallet or self._wallet
         try:
             tx = EscrowFinish(
                 owner=owner,
                 offer_sequence=escrow_sequence,
-                account=self.address
+                account=wallet_to_use.classic_address
             )
-            response = self.submit(tx)
-            return response.result
+            return self.submit(tx, wallet_to_use)
         except Exception as e:
             raise XRPLSubmissionError(f"Failed to finish escrow: {e}") from e
 
     # -------------------------
     # Clawback
     # -------------------------
-    def clawback(self, from_account: str, amount: float) -> dict:
-        """Claw back issued currency"""
+    def clawback(
+        self,
+        from_account: str,
+        amount: float,
+        wallet: Wallet | None = None
+    ) -> dict:
+        wallet_to_use = wallet or self._wallet
         try:
             tx = Clawback(
-                issuer=self.address,
+                issuer=wallet_to_use.classic_address,
                 from_account=from_account,
                 amount=str(amount)
             )
-            response = self.submit(tx)
-            return response.result
+            return self.submit(tx, wallet_to_use)
         except Exception as e:
             raise XRPLSubmissionError(f"Failed to clawback funds: {e}") from e
+
+    # -------------------------
+    # Helper: check bank trustline
+    # -------------------------
+    def has_trustline(self, bank: dict, currency: str) -> bool:
+        """Return True if the bank has a trustline for the given currency."""
+        for t in bank.get("trustlines", []):
+            if t["currency"].upper() == currency.upper():
+                return True
+        return False
