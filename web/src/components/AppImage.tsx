@@ -2,12 +2,12 @@ import React from 'react';
 import Image from 'next/image';
 
 interface AppImageProps {
-  src: string;
+  src: string;        
   alt?: string;
   className?: string;
   width?: number;
   height?: number;
-  [key: string]: any;
+  [key: string]: any; 
 }
 
 export default function AppImage({
