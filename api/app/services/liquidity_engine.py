@@ -1,5 +1,6 @@
 # api/services/liquidity_engine.py
 from typing import Dict
+from datetime import datetime
 from ..models.credentials import CreditCredential
 from ..models.requests import LiquidityRequest
 
@@ -30,7 +31,7 @@ class LiquidityEngine:
         return gap
 
     def prepare_request(
-        self, cashflow: Dict[str, float], credential: CreditCredential
+        self, cashflow: Dict[str, float], credential: CreditCredential, unlock_timestamp: datetime
     ) -> LiquidityRequest:
         """
         Prepare a LiquidityRequest for a bank based on projected cashflow and credit limits.
@@ -46,7 +47,7 @@ class LiquidityEngine:
         return LiquidityRequest(
             business_id=credential.business_id,
             requested_amount=requested_amount,
-            duration_days=7,  # default, can be parameterized
+            unlock_timestamp=unlock_timestamp,
             metrics={
                 "default_rate": 0.004,  # example, can be dynamic
                 "volatility": 0.12       # example metric

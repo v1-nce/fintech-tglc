@@ -2,10 +2,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-import logging
+import logging, re
 from datetime import datetime
 
 from ..services.proof_verifier import ProofVerifier
+from ..services.risk_model import RiskModel
+from ..services.liquidity_engine import LiquidityEngine
+from ..services.credential_service import CredentialService
+from ..services.policy_engine import PolicyEngine
+from ..models.exposure_state import ExposureState
+from ..services.xrpl_client import XRPLClient
 from ..agent.business_agent import BusinessAgent
 from ..agent.bank_agent import BankAgent
 
@@ -52,17 +58,23 @@ async def request_liquidity(req: LiquidityRequest):
             proof_result = await run_in_threadpool(verifier.verify, proof_obj)
 
         # Step 2: Business prepares liquidity request
-        business_agent = BusinessAgent()
-        liquidity_request_internal = business_agent.prepare_request(
-            principal_did=req.principal_did,
-            principal_address=req.principal_address,
-            amount=req.amount_xrp,
-            proof_metrics=proof_result,
+        business_agent = BusinessAgent(
+            risk_model=RiskModel(),
+            liquidity_engine=LiquidityEngine(),
+            credential_service=CredentialService()
+        )
+        liquidity_request_internal = business_agent.act(
+            business_id=req.principal_did,
             unlock_time=req.unlock_time
         )
 
         # Step 3: Bank evaluates the request
-        bank_agent = BankAgent()
+        bank_agent = BankAgent(
+            proof_verifier=ProofVerifier(),
+            policy_engine=PolicyEngine(),
+            exposure_state=ExposureState(),
+            xrpl_client=XRPLClient()
+        )
         decision = bank_agent.act(liquidity_request_internal)
 
         if not decision.approved:
