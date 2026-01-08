@@ -1,6 +1,6 @@
 # api/services/proof_verifier.py
 from datetime import datetime, timedelta
-from ..models.proofs import ProofPayload
+from ..models.proof import ProofPayload
 
 class ProofVerifier:
     """
