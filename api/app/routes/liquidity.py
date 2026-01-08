@@ -1,4 +1,3 @@
-# routes/liquidity.py
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
@@ -94,16 +93,13 @@ async def verify_proof(proof_data: ProofPayload):
     Standalone endpoint to verify proof data.
     """
     try:
-        # Convert incoming Pydantic model to ProofPayload object (ensures attributes exist)
-        proof_obj = ProofPayload(**proof_data.model_dump())
-
+        # proof_data is already a ProofPayload with all attributes
         verifier = ProofVerifier()
         result = await run_in_threadpool(
             verifier.verify,
-            proof_obj  # pass the object, not a dict
+            proof_data  # pass the object directly
         )
         return {"status": "success", "result": result}
     except Exception as e:
         logger.error(f"Proof verification failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to verify proof")
-
