@@ -16,6 +16,5 @@ class LiquidityRequest(BaseModel):
     """
     business_id: str
     requested_amount: float
-    duration_days: int
-    metrics: Dict[str, float]
     unlock_timestamp: datetime # For escrow
+    metrics: Dict[str, float]
