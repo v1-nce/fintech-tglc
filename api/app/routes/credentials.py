@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from ..services.credential_service import CredentialService
-import re
+from ..utils.validators import validate_xrpl_address
 import logging
 
 logger = logging.getLogger(__name__)
@@ -64,4 +64,4 @@ async def issue_credential(req: IssueRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Credential issuance failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to issue credential")
+        raise HTTPException(status_code=500, detail=str(e))

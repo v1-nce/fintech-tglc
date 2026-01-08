@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-import re
 import logging
 
 from ..services.proof_verifier import ProofVerifier
