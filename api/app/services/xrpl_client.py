@@ -4,12 +4,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
 
-from xrpl.models.transactions import TrustSet
 from xrpl.models.requests import AccountInfo
-from xrpl.transaction import safe_sign_and_autofill_transaction
+from xrpl.models.transactions import TrustSet
+from xrpl.transaction import submit_and_wait
 from xrpl.clients import JsonRpcClient
 from xrpl.wallet import Wallet
-from xrpl.transaction import submit_and_wait
 
 
 # =====================
@@ -162,8 +161,8 @@ class XRPLClient:
         :return: XRPL transaction result as dict
         :raises XRPLSubmissionError: if submission fails
         """
+        # Build the TrustSet transaction
         try:
-            # Build the TrustSet transaction
             tx = TrustSet(
                 account=account,
                 limit_amount={
@@ -171,23 +170,26 @@ class XRPLClient:
                     "issuer": issuer,
                     "value": str(limit_amount),
                 },
-                # Optional to add flags here, e.g., tfSetNoRipple
-                # flags=0
             )
 
-            # Autofill sequence, fee, lastLedgerSequence
-            signed_tx = safe_sign_and_autofill_transaction(
-                tx, self._wallet, self._client
+            # Sign + autofill + submit all in one
+            response = submit_and_wait(
+                tx,              # unsigned transaction
+                self._client,    # client
+                self._wallet     # wallet to sign with
             )
 
-            # Submit to XRPL
-            result = self.submit(signed_tx)
+            if not response.is_successful():
+                raise XRPLSubmissionError(
+                    f"Transaction failed: {response.result}"
+                )
 
-            # Can optionally track expiration in your database; XRPL itself has no expiration
+            result = response.result
+
             if expiration:
-                result.result["expires_at"] = expiration.isoformat()
+                result["expires_at"] = expiration.isoformat()
 
-            return result.result
+            return result
 
         except Exception as e:
             raise XRPLSubmissionError(f"Failed to set TrustLine: {e}") from e
